@@ -50,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -448,19 +449,24 @@ private fun StandardBottomSheet(
                 .graphicsLayer {
                     translationY = -SheetBottomInset.toPx() * insetProgress * hiddenVisibilityProgress
                 }
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { sheetVisualShape },
-                    effects = {
-                        // AstraFlow 性能补丁(2026-10-23 真机取证): 面板底色不透明时底下这层模糊整片看不见,
-                        // 却每帧都要算一遍全屏高斯; 只在半透明面板上模糊。
-                        if (containerColor.alpha < 1f) {
-                            blur(blurRadius.toPx())
-                        }
+                // AstraFlow 性能补丁(2026-10-24 扩展,真机取证见 .scratch/perf):
+                // 面板底色不透明时,drawBackdrop 的玻璃高光(RuntimeShader 边缘)、
+                // glassEdge 的柔影与背景模糊整片都看不见,却每帧都要跑——弹层开合
+                // 动画每帧超预算的直接来源。不透明面板整段跳过:直接画底色,
+                // 视觉零变化;半透明面板保持上游完整玻璃链。
+                .then(
+                    if (containerColor.alpha < 1f) {
+                        Modifier.drawBackdrop(
+                            backdrop = backdrop,
+                            shape = { sheetVisualShape },
+                            effects = { blur(blurRadius.toPx()) },
+                            highlight = { Highlight.Default.copy(alpha = 0.35f) },
+                            onDrawSurface = { drawRect(containerColor) },
+                        ).glassEdge(sheetVisualShape, softShadow = true)
+                    } else {
+                        Modifier.drawBehind { drawRect(containerColor) }
                     },
-                    highlight = { Highlight.Default.copy(alpha = 0.35f) },
-                    onDrawSurface = { drawRect(containerColor) },
-                ).glassEdge(sheetVisualShape, softShadow = true)
+                )
                 .requiredHeightIn(min = peekHeight)
                 .nestedScroll(
                     remember(state.swipeableState) {
@@ -473,15 +479,7 @@ private fun StandardBottomSheet(
                 ).swipeableV2(
                     state = state.swipeableState,
                     orientation = orientation,
-                    // AstraFlow 性能/交互补丁(2026-10-23 用户实测): Scroll 内容交互模式下,直接拖拽
-                    // 仍然会整块拖走弹层——内容滚不动的剩余手势、打开动画期间的手指按下都会命中这里,
-                    // 用户看到的是「手指一划弹窗被提起来、露出底下的页面」。Scroll 模式下收起
-                    // 由「完成」按钮、返回手势、点弹层外(dismissOnClickOutside)承担,拖拽手势停用。
-                    enabled = sheetSwipeEnabled &&
-                        (
-                            state.presentationStyle !is PresentationStyle.Modal ||
-                                state.presentationStyle.contentInteraction != PresentationContentInteraction.Scroll
-                            ),
+                    enabled = sheetSwipeEnabled,
                 ).swipeAnchors(
                     state.swipeableState,
                     possibleValues =
