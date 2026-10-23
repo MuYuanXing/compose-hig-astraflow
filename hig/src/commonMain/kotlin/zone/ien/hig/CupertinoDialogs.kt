@@ -63,6 +63,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -106,6 +107,7 @@ import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.kyant.backdrop.drawBackdrop
@@ -401,10 +403,14 @@ fun CupertinoActionSheet(
     // 宿主把灰底统一画在页面窗口时传透明,避免两层遮罩。
     onGone: () -> Unit = {},
     scrimColor: Color = CupertinoDialogsDefaults.ScrimColor,
+    // AstraFlow 补丁(2026-10-24): 宿主可以把页面录下的画面直接交给面板做玻璃。
+    // 上游的 LocalCupertinoDialogBackdrop 是 internal,应用侧给不进来;不传时行为与上游一致。
+    backdrop: Backdrop? = null,
     content: (@Composable () -> Unit)? = null,
     buttons: AlertDialogActionsScope.() -> Unit,
 ) {
-    val backdrop = LocalCupertinoDialogBackdrop.current ?: LocalCupertinoBackdrop.current
+    val sheetBackdrop: Backdrop? =
+        backdrop ?: LocalCupertinoDialogBackdrop.current ?: LocalCupertinoBackdrop.current
     CompositionLocalProvider(
         LocalContainerColor provides containerColor,
     ) {
@@ -422,7 +428,7 @@ fun CupertinoActionSheet(
                     hasTitle = hasTitle,
                     primaryContainerColor = containerColor,
                     secondaryContainerColor = secondaryContainerColor,
-                    backdrop = backdrop,
+                    backdrop = sheetBackdrop,
                 ).apply(buttons)
 
             scope.run {
@@ -1011,7 +1017,8 @@ private class CupertinoActionSheetImpl(
     private val hasTitle: Boolean,
     private val primaryContainerColor: Color,
     private val secondaryContainerColor: Color,
-    private val backdrop: LayerBackdrop?,
+    // AstraFlow 补丁(2026-10-24): 接受任意 Backdrop(宿主交进来的是页面录下的画面,不必是 LayerBackdrop)。
+    private val backdrop: Backdrop?,
 ): AlertDialogActionsScope {
     private val buttons = mutableListOf<Pair<AlertActionStyle, @Composable () -> Unit>>()
     val hasPickerActions: Boolean
@@ -1324,10 +1331,10 @@ private class CupertinoActionSheetImpl(
 
 private fun <T> Transition.Segment<Boolean>.sheetAnimation(): FiniteAnimationSpec<T> =
     if (true isTransitioningTo false) {
-        spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow,
-        )
+        // AstraFlow 补丁(2026-10-24): 收起用定长缓出,不用低刚度弹簧。
+        // 弹簧滑到屏幕外之后还要再跑几百毫秒才 idle,宿主等收起完成(onGone)收灰底、
+        // 接下一个弹窗都被这段空等拖长(用户 2026-10-24:消失时动画有问题,灰底滞留太久)。
+        tween(durationMillis = 260)
     } else {
         cupertinoTween()
     }
@@ -1364,14 +1371,20 @@ internal object CupertinoDialogsTokens {
     val PickerToolbarHeight: Dp = 60.dp
     val ActionSheetTitleMessageSpacing: Dp = 6.dp
     val ActionSheetWindowInsets: WindowInsets
+        // AstraFlow 补丁(2026-10-24): 安卓手势导航下 navigationBars 是 0,上游只按它留白,
+        // 面板底边只剩 ActionSheetSidePadding(8dp),会压在底部手势条(小白条)上
+        //(用户 2026-10-24:弹窗没有适配底部小白条)。这里并入手势区,面板整个落在手势条上方;
+        // 三键导航下 navigationBars 更大,取并集不受影响。
         @Composable
-        get() =
-            WindowInsets.navigationBars.union(
+        get() {
+            val density = LocalDensity.current
+            val gestureBottom = with(density) { WindowInsets.systemGestures.getBottom(density).toDp() }
+            return WindowInsets.navigationBars.union(
                 WindowInsets(
-                    bottom =
-                    ActionSheetSidePadding,
+                    bottom = maxOf(gestureBottom, ActionSheetSidePadding),
                 ),
             )
+        }
 }
 
 private const val AlertDialogHorizontalFontScaleLimit = 1.2f
