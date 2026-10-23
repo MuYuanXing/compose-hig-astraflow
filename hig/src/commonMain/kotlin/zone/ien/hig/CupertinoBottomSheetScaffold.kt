@@ -473,7 +473,15 @@ private fun StandardBottomSheet(
                 ).swipeableV2(
                     state = state.swipeableState,
                     orientation = orientation,
-                    enabled = sheetSwipeEnabled,
+                    // AstraFlow 性能/交互补丁(2026-10-23 用户实测): Scroll 内容交互模式下,直接拖拽
+                    // 仍然会整块拖走弹层——内容滚不动的剩余手势、打开动画期间的手指按下都会命中这里,
+                    // 用户看到的是「手指一划弹窗被提起来、露出底下的页面」。Scroll 模式下收起
+                    // 由「完成」按钮、返回手势、点弹层外(dismissOnClickOutside)承担,拖拽手势停用。
+                    enabled = sheetSwipeEnabled &&
+                        (
+                            state.presentationStyle !is PresentationStyle.Modal ||
+                                state.presentationStyle.contentInteraction != PresentationContentInteraction.Scroll
+                            ),
                 ).swipeAnchors(
                     state.swipeableState,
                     possibleValues =
