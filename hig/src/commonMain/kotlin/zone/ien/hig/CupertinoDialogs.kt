@@ -77,6 +77,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -395,6 +396,11 @@ fun CupertinoActionSheet(
     containerColor: Color = CupertinoDialogsDefaults.ContainerColor,
     secondaryContainerColor: Color = CupertinoTheme.colorScheme.tertiarySystemBackground,
     properties: DialogProperties = DialogProperties(),
+    // AstraFlow 补丁(2026-10-24): onGone = 收起动画播完、窗口拿掉前回调一次
+    //(「先收本表、动画播完再弹下一个弹窗」的接续用);scrimColor 可覆盖——
+    // 宿主把灰底统一画在页面窗口时传透明,避免两层遮罩。
+    onGone: () -> Unit = {},
+    scrimColor: Color = CupertinoDialogsDefaults.ScrimColor,
     content: (@Composable () -> Unit)? = null,
     buttons: AlertDialogActionsScope.() -> Unit,
 ) {
@@ -406,6 +412,8 @@ fun CupertinoActionSheet(
             visible = visible,
             onDismissRequest = onDismissRequest,
             dialogProperties = properties,
+            onGone = onGone,
+            scrimColor = scrimColor,
         ) {
             val hasTitle = title != null || message != null
 
@@ -683,12 +691,16 @@ private fun DialogSheet(
     visible: Boolean,
     onDismissRequest: () -> Unit,
     dialogProperties: DialogProperties,
+    onGone: () -> Unit = {},
+    scrimColor: Color = CupertinoDialogsDefaults.ScrimColor,
     content: @Composable () -> Unit,
 ) {
     AnimatedSheet(
         visible = visible,
         onDismissRequest = onDismissRequest,
         properties = dialogProperties,
+        onGone = onGone,
+        scrimColor = scrimColor,
     ) { updatePanelBounds ->
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val maxSheetHeight = if (maxHeight != Dp.Infinity) maxHeight * 0.9f else Dp.Infinity
@@ -712,6 +724,11 @@ private fun AnimatedSheet(
     onDismissRequest: () -> Unit,
     properties: DialogProperties = DialogProperties(),
     scrimColor: Color = CupertinoDialogsDefaults.ScrimColor,
+    // AstraFlow 补丁(2026-10-24): 收起动画播完、窗口拿掉前回调一次。宿主要有
+    // 「先收起本表、动画播完再弹下一个弹窗」的接续语义(两窗同帧并存绘制是实测的
+    // 掉帧来源);上游没有这个口子,观察放在 Dialog 组合之外(remember 的 transition
+    // state 不随窗口销毁),每个「出现过→收起完成」周期发一次。
+    onGone: () -> Unit = {},
     content: @Composable BoxScope.(updatePanelBounds: (Rect) -> Unit) -> Unit,
 ) {
     val expandedStates = remember { MutableTransitionState(false) }
@@ -721,6 +738,21 @@ private fun AnimatedSheet(
     }
 
     expandedStates.targetState = visible
+
+    // 收起完成通知:必须挂在窗口组合之外(下面的 if 不满足时窗口整个移除,
+    // 里面的副作用会先一步销毁)。持续观察,不用一次性标记——每个开合周期都要发。
+    val latestOnGone by rememberUpdatedState(onGone)
+    LaunchedEffect(Unit) {
+        var everShown = false
+        snapshotFlow { Triple(expandedStates.targetState, expandedStates.isIdle, expandedStates.currentState) }
+            .collect { (target, idle, current) ->
+                if (target) everShown = true
+                if (everShown && idle && !current) {
+                    everShown = false
+                    latestOnGone()
+                }
+            }
+    }
 
     if (expandedStates.currentState || expandedStates.targetState) {
         val haptic = LocalHapticFeedback.current
