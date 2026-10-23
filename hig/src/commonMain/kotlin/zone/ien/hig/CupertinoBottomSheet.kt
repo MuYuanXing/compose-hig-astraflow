@@ -539,6 +539,18 @@ class CupertinoSheetState(
         swipeableState.snapTo(targetValue)
     }
 
+    // AstraFlow 补丁(2026-10-24): 弹层宿主要判断「锚点已就绪」与「假开复位」,
+    // 但 swipeableState/anchors/snapTo 都是 internal,跨模块不可见。暴露只读的就绪判断
+    // 与无动画复位两个最小面,不改变任何上游行为。
+    /** 锚点是否已注册且至少有两个不同位置(Hidden 与展开位)。 */
+    val anchorsReady: Boolean
+        get() = swipeableState.anchors.values.toSet().size >= 2
+
+    /** 无动画直接归位到 Hidden。用于竞态善后:show() 在锚点未注册时只改 currentValue 不动 offset。 */
+    suspend fun snapToHidden() {
+        swipeableState.snapTo(CupertinoSheetValue.Hidden)
+    }
+
     /**
      * Attempt to snap synchronously. Snapping can happen synchronously when there is no other swipe
      * transaction like a drag or an animation is progress. If there is another interaction in
