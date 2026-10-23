@@ -452,7 +452,11 @@ private fun StandardBottomSheet(
                     backdrop = backdrop,
                     shape = { sheetVisualShape },
                     effects = {
-                        blur(blurRadius.toPx())
+                        // AstraFlow 性能补丁(2026-10-23 真机取证): 面板底色不透明时底下这层模糊整片看不见,
+                        // 却每帧都要算一遍全屏高斯; 只在半透明面板上模糊。
+                        if (containerColor.alpha < 1f) {
+                            blur(blurRadius.toPx())
+                        }
                     },
                     highlight = { Highlight.Default.copy(alpha = 0.35f) },
                     onDrawSurface = { drawRect(containerColor) },
@@ -671,13 +675,7 @@ private fun BottomSheetScaffoldLayout(
                                 scaffoldSize = it.toSize().toDpSize()
                             }
                         }.background(colors.scaledScaffoldBackgroundColor)
-                        .drawWithContent {
-                            drawContent()
-                            drawRect(
-                                color = colors.scrimColor,
-                                alpha = animatedAlpha * actualProgress(),
-                            )
-                        }.then(modifier),
+                        .then(modifier),
                 topBar = { topBar?.invoke() },
                 bottomBar = { bottomBar?.invoke() },
                 content = body,
@@ -690,6 +688,21 @@ private fun BottomSheetScaffoldLayout(
                 bottomBarBackdropEnabled = bottomBarBackdropEnabled,
             )
         }
+        // AstraFlow 性能补丁(2026-10-23 真机取证): 遮罩原来画在页面同一条绘制链上,
+        // 开合动画里每帧都把整页(1272×2800)重录进离屏层并重算模糊; 挪成同级覆盖层后
+        // 页面缓存不再被遮罩动画打断, 遮罩本身照旧每帧按进度变化。
+        Box(
+            modifier =
+                Modifier
+                    .matchParentSize()
+                    .drawWithContent {
+                        drawRect(
+                            color = colors.scrimColor,
+                            alpha = animatedAlpha * actualProgress(),
+                        )
+                    },
+        )
+
 
         if (!sheetState.isBackgroundInteractive) {
             Spacer(
