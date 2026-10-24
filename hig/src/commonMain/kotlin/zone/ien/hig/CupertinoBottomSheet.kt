@@ -29,8 +29,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
@@ -69,6 +72,13 @@ import com.kyant.capsule.ContinuousRoundedRectangle
 import kotlin.jvm.JvmName
 
 internal val LocalCupertinoSheetSurfaceDrawn = staticCompositionLocalOf { false }
+
+// AstraFlow 补丁: 收起用的定长缓出,时长与操作面板的收起补丁(CupertinoDialogs 里的 260ms)一致。
+private val SheetHideAnimationSpec: AnimationSpec<Float> =
+    tween(
+        durationMillis = 260,
+        easing = FastOutSlowInEasing,
+    )
 
 /**
  * Content of the Cupertino modal bottom sheet.
@@ -507,7 +517,16 @@ class CupertinoSheetState(
      * @throws [CancellationException] if the animation is interrupted
      */
     suspend fun hide() {
-        animateTo(CupertinoSheetValue.Hidden)
+        // AstraFlow 补丁(2026-10-24): 收起改用定长缓出。
+        // 原来走默认 spring(NoBouncy/MediumLow): 逐帧实测起手 3 帧(约 48ms)完全不动,
+        // 随后一帧直接跳 ~115px 冲出屏幕,剩下的路程在屏幕外空转 ~600ms,
+        // 遮罩(alpha = 1 - offset/sheetHeight)跟着这 800ms 慢慢淡完,
+        // 看上去就是「先卡一下 → 猛地下坠 → 灰底迟迟不散」。
+        // 定长缓出收到底即隐蔽(内容卸载、遮罩归零),展开与拖动归位仍用弹簧。
+        animateTo(
+            targetValue = CupertinoSheetValue.Hidden,
+            spec = SheetHideAnimationSpec,
+        )
     }
 
     /**
@@ -523,8 +542,13 @@ class CupertinoSheetState(
     internal suspend fun animateTo(
         targetValue: CupertinoSheetValue,
         velocity: Float = swipeableState.lastVelocity,
+        spec: AnimationSpec<Float>? = null,
     ) {
-        swipeableState.animateTo(targetValue, velocity)
+        if (spec != null) {
+            swipeableState.animateTo(targetValue, velocity, spec)
+        } else {
+            swipeableState.animateTo(targetValue, velocity)
+        }
     }
 
     /**

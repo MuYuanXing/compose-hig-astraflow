@@ -364,6 +364,9 @@ internal class SwipeableV2State<T>(
     suspend fun animateTo(
         targetValue: T,
         velocity: Float = lastVelocity,
+        // AstraFlow 补丁: 允许调用方只对这一次动画指定 spec(例如收起用定长缓出),
+        // 不传时仍用构造时的 animationSpec,旧行为不变。
+        spec: AnimationSpec<Float> = animationSpec,
     ) {
         val targetOffset = anchors[targetValue]
         if (targetOffset != null) {
@@ -371,7 +374,7 @@ internal class SwipeableV2State<T>(
                 swipe {
                     animationTarget = targetValue
                     var prev = offset ?: 0f
-                    animate(prev, targetOffset, velocity, animationSpec) { value, velocity ->
+                    animate(prev, targetOffset, velocity, spec) { value, velocity ->
                         // Our onDrag coerces the value within the bounds, but an animation may
                         // overshoot, for example a spring animation or an overshooting interpolator
                         // We respect the user's intention and allow the overshoot, but still use
