@@ -50,7 +50,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -452,8 +451,12 @@ private fun StandardBottomSheet(
                 // AstraFlow 性能补丁(2026-10-24 扩展,真机取证见 .scratch/perf):
                 // 面板底色不透明时,drawBackdrop 的玻璃高光(RuntimeShader 边缘)、
                 // glassEdge 的柔影与背景模糊整片都看不见,却每帧都要跑——弹层开合
-                // 动画每帧超预算的直接来源。不透明面板整段跳过:直接画底色,
-                // 视觉零变化;半透明面板保持上游完整玻璃链。
+                // 动画每帧超预算的直接来源。不透明面板整段跳过玻璃链;底色不能在这里
+                // 用 drawBehind 画:这条修饰链整段都在 CupertinoSurface 的裁剪层
+                // (graphicsLayer{shape; clip = true})外面,画出来是一整块无圆角矩形,
+                // 圆角就这么被填平了(用户 2026-10-25:公告、教程弹层顶部圆角变直角,
+                // 圆角四周延伸出一条矩形)。改由 CupertinoSurface 自己的 color 在裁剪层
+                // 内按 shape 画,半透明面板保持上游完整玻璃链。
                 .then(
                     if (containerColor.alpha < 1f) {
                         Modifier.drawBackdrop(
@@ -464,7 +467,7 @@ private fun StandardBottomSheet(
                             onDrawSurface = { drawRect(containerColor) },
                         ).glassEdge(sheetVisualShape, softShadow = true)
                     } else {
-                        Modifier.drawBehind { drawRect(containerColor) }
+                        Modifier
                     },
                 )
                 .requiredHeightIn(min = peekHeight)
@@ -523,7 +526,9 @@ private fun StandardBottomSheet(
                     },
                 ),
         shape = sheetVisualShape,
-        color = Color.Transparent,
+        // 不透明面板的底色由 CupertinoSurface 自己画:它在 graphicsLayer{shape; clip = true}
+        // 里面,会被 sheetVisualShape 裁成圆角(画在外面的 drawBehind 不受裁剪,见上面的补丁注释)
+        color = if (containerColor.alpha < 1f) Color.Transparent else containerColor,
         shadowElevation = shadowElevation,
         contentColor = contentColor,
     ) {
