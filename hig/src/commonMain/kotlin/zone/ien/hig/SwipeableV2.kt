@@ -91,7 +91,12 @@ internal fun <T> Modifier.swipeableV2(
     enabled = enabled,
     interactionSource = interactionSource,
     reverseDirection = reverseDirection,
-    startDragImmediately = state.isAnimationRunning,
+    // AstraFlow 补丁:手指按下不再立刻接手程序动画。上游写的是 startDragImmediately =
+    // state.isAnimationRunning,于是弹层展开途中的任意一次触摸都会当场取消 show();而
+    // SwipeableV2State.animateTo 的 finally 在动画停不到锚点上时会把 currentValue 留成旧值
+    // (Hidden),上层据此判定「已收起」,弹层就整层消失了(用户 2026-10-24:呼出后一秒内点弹层
+    // 任意处整个弹层消失,等一下再点就没事)。改成等手指过滑动阈值再接管:轻点不影响展开,
+    // 真要拖动时仍从当前位置接着拖,settle 逻辑不变。
     onDragStopped = { velocity -> launch { state.settle(velocity) } },
 )
 
