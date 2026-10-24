@@ -19,6 +19,8 @@
 
 package zone.ien.hig
 
+import android.graphics.Color
+import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
@@ -40,22 +42,37 @@ internal actual fun FullscreenPopupProperties(
     dismissOnBackPress: Boolean,
     dismissOnClickOutside: Boolean,
     usePlatformDefaultWidth: Boolean,
+    decorFitsSystemWindows: Boolean,
 ): DialogProperties =
     DialogProperties(
-        decorFitsSystemWindows = true,
+        // AstraFlow 补丁(2026-10-24): 由调用方决定窗口内容是否铺到系统栏底下。
+        decorFitsSystemWindows = decorFitsSystemWindows,
         dismissOnBackPress = dismissOnBackPress,
         dismissOnClickOutside = dismissOnClickOutside,
         usePlatformDefaultWidth = usePlatformDefaultWidth,
     )
 
 @Composable
-internal actual fun PrepareComposeDialogWindow() {
+internal actual fun PrepareComposeDialogWindow(edgeToEdge: Boolean) {
     val view = LocalView.current
     SideEffect {
         val window = (view.parent as? DialogWindowProvider)?.window
         window?.let {
             if (it.attributes.dimAmount != 0f) it.setDimAmount(0f)
             if (it.attributes.windowAnimations != 0) it.setWindowAnimations(0)
+            if (edgeToEdge) {
+                // AstraFlow 补丁(2026-10-24): 全屏弹层窗口的栏底色透明, 并关掉系统给栏底加的
+                // 对比灰底——不然小白条那一条会单独有一层灰, 跟窗口里画的灰底接不上
+                //(用户 2026-10-24: 小白条区域有一条相关遮罩)。
+                @Suppress("DEPRECATION")
+                it.statusBarColor = Color.TRANSPARENT
+                @Suppress("DEPRECATION")
+                it.navigationBarColor = Color.TRANSPARENT
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    it.isStatusBarContrastEnforced = false
+                    it.isNavigationBarContrastEnforced = false
+                }
+            }
         }
     }
 }

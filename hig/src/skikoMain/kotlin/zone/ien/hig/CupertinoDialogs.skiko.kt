@@ -33,6 +33,7 @@ actual fun FullscreenPopupProperties(
     dismissOnBackPress: Boolean,
     dismissOnClickOutside: Boolean,
     usePlatformDefaultWidth: Boolean,
+    decorFitsSystemWindows: Boolean,
 ): DialogProperties =
     DialogProperties(
         usePlatformInsets = false,
@@ -44,6 +45,6 @@ actual fun FullscreenPopupProperties(
     )
 
 @Composable
-internal actual fun PrepareComposeDialogWindow() = Unit
+internal actual fun PrepareComposeDialogWindow(edgeToEdge: Boolean) = Unit
 
 actual val DialogProperties.platformInsets: Boolean get() = usePlatformInsets

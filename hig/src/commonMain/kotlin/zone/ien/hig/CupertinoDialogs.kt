@@ -58,6 +58,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.mandatorySystemGestures
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -420,6 +421,11 @@ fun CupertinoActionSheet(
             dialogProperties = properties,
             onGone = onGone,
             scrimColor = scrimColor,
+            // AstraFlow 补丁(2026-10-24): 操作面板的窗口铺到系统栏底下。
+            // 原来窗口按系统栏给自己留白(decorFitsSystemWindows = true), 窗口里的灰底只到
+            // 小白条上沿为止, 小白条那一条不跟其他区域一起变暗, 收起时面板和灰底也在那一条上方断开
+            //(用户 2026-10-24: 小白条区域有一条相关遮罩、收起时也不适配)。
+            edgeToEdge = true,
         ) {
             val hasTitle = title != null || message != null
 
@@ -563,10 +569,16 @@ internal expect fun FullscreenPopupProperties(
     dismissOnBackPress: Boolean = true,
     dismissOnClickOutside: Boolean = false,
     usePlatformDefaultWidth: Boolean = true,
+    // AstraFlow 补丁(2026-10-24): 为真时窗口内容铺到系统栏(含底部小白条)底下,
+    // 全屏弹层的灰底与收起动画才覆盖整窗。
+    decorFitsSystemWindows: Boolean = true,
 ): DialogProperties
 
 @Composable
-internal expect fun PrepareComposeDialogWindow()
+internal expect fun PrepareComposeDialogWindow(
+    // AstraFlow 补丁(2026-10-24): 为真时把窗口的栏底色调透明、关掉系统给栏底加的那层对比灰底。
+    edgeToEdge: Boolean = false,
+)
 
 expect val DialogProperties.platformInsets: Boolean
 
@@ -699,6 +711,8 @@ private fun DialogSheet(
     dialogProperties: DialogProperties,
     onGone: () -> Unit = {},
     scrimColor: Color = CupertinoDialogsDefaults.ScrimColor,
+    // AstraFlow 补丁(2026-10-24): 见 CupertinoActionSheet 里的说明。
+    edgeToEdge: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     AnimatedSheet(
@@ -707,6 +721,7 @@ private fun DialogSheet(
         properties = dialogProperties,
         onGone = onGone,
         scrimColor = scrimColor,
+        edgeToEdge = edgeToEdge,
     ) { updatePanelBounds ->
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val maxSheetHeight = if (maxHeight != Dp.Infinity) maxHeight * 0.9f else Dp.Infinity
@@ -730,6 +745,8 @@ private fun AnimatedSheet(
     onDismissRequest: () -> Unit,
     properties: DialogProperties = DialogProperties(),
     scrimColor: Color = CupertinoDialogsDefaults.ScrimColor,
+    // AstraFlow 补丁(2026-10-24): 为真时窗口铺到系统栏底下(见 FullscreenPopupProperties)。
+    edgeToEdge: Boolean = false,
     // AstraFlow 补丁(2026-10-24): 收起动画播完、窗口拿掉前回调一次。宿主要有
     // 「先收起本表、动画播完再弹下一个弹窗」的接续语义(两窗同帧并存绘制是实测的
     // 掉帧来源);上游没有这个口子,观察放在 Dialog 组合之外(remember 的 transition
@@ -769,9 +786,10 @@ private fun AnimatedSheet(
                     dismissOnBackPress = properties.dismissOnBackPress,
                     dismissOnClickOutside = properties.dismissOnClickOutside,
                     usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = !edgeToEdge,
                 ),
         ) {
-            PrepareComposeDialogWindow()
+            PrepareComposeDialogWindow(edgeToEdge = edgeToEdge)
             CompositionLocalProvider(LocalHapticFeedback provides haptic) {
                 val transition = rememberTransition(expandedStates, "CupertinoSheet")
 
@@ -1379,9 +1397,15 @@ internal object CupertinoDialogsTokens {
         get() {
             val density = LocalDensity.current
             val gestureBottom = with(density) { WindowInsets.systemGestures.getBottom(density).toDp() }
+            // AstraFlow 补丁(2026-10-24): 面板窗口改成铺到系统栏底下(见 DialogSheet 的 edgeToEdge)之后,
+            // 这里要自己让出系统手势区。真机(PLQ110, 手势导航, 密度 476)实测: navigationBars = 0、
+            // systemGestures 只有左右、mandatorySystemGestures.bottom = 95px ≈ 32dp ——
+            // 只按前两者算出来是 8dp,按钮会压在小白条的滑动热区上。
+            val mandatoryBottom =
+                with(density) { WindowInsets.mandatorySystemGestures.getBottom(density).toDp() }
             return WindowInsets.navigationBars.union(
                 WindowInsets(
-                    bottom = maxOf(gestureBottom, ActionSheetSidePadding),
+                    bottom = maxOf(gestureBottom, mandatoryBottom, ActionSheetSidePadding),
                 ),
             )
         }

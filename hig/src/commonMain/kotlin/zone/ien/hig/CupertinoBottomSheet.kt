@@ -605,6 +605,11 @@ class CupertinoSheetState(
 
     internal val offset: Float? get() = swipeableState.offset
 
+    // AstraFlow 补丁(2026-10-24): 开合动画(含拖动松手后的 settle)是否还在跑。外部点击收起要用它
+    // 挡住「刚呼出、面板还在往上跑时点一下就整层关掉」(用户 2026-10-24:一秒内点任何地方都会消失,
+    // 等一会再点就正常 —— 那会面板还没盖住点击处,点到了下面那层「点外部收起」)。
+    internal val isAnimating: Boolean get() = swipeableState.isAnimationRunning
+
     companion object {
         /**
          * The default [Saver] implementation for [CupertinoSheetState].

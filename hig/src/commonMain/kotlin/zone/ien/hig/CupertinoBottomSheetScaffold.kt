@@ -711,16 +711,36 @@ private fun BottomSheetScaffoldLayout(
 
 
         if (!sheetState.isBackgroundInteractive) {
-            Spacer(
+            // AstraFlow 补丁(2026-10-24): 点外部收起这一层只盖「面板上边以上」。
+            // 原来是一整块 matchParentSize 的 Spacer 压在面板下面一层、盖满整窗; 面板表面自己
+            // 没有点击处理, 所以点面板正文、标题、底部小白条区都会穿透到这块 Spacer,
+            // 呼出后随手点一下就整层关掉(用户 2026-10-24: 一秒内点任何地方都会消失)。
+            // 高度取 sheetOffset(面板上边离窗口顶的距离), 高度为 0 时整块不参与命中,
+            // 因此面板盖住的部分(含手势条区域)不再响应「点外部收起」。
+            Box(
                 modifier =
                     Modifier
-                        .size(scaffoldSize)
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .layout { measurable, constraints ->
+                            val uncovered = sheetOffset().roundToInt().coerceIn(0, constraints.maxHeight)
+                            val placeable =
+                                measurable.measure(
+                                    constraints.copy(minHeight = uncovered, maxHeight = uncovered),
+                                )
+                            layout(placeable.width, placeable.height) {
+                                placeable.placeRelative(0, 0)
+                            }
+                        }
                         .pointerInput(sheetState) {
                             if ((sheetState.presentationStyle as? PresentationStyle.Modal)
                                     ?.dismissOnClickOutside == true
                             ) {
                                 detectTapGestures {
-                                    if (sheetState.confirmValueChange(CupertinoSheetValue.Hidden)) {
+                                    // 开合还没停(面板在路上)时点到的不是「外面」,别关
+                                    if (!sheetState.isAnimating &&
+                                        sheetState.confirmValueChange(CupertinoSheetValue.Hidden)
+                                    ) {
                                         coroutineScope.launch {
                                             sheetState.hide()
                                         }
@@ -740,7 +760,10 @@ private fun BottomSheetScaffoldLayout(
                 subcompose(BottomSheetScaffoldLayoutSlot.Sheet) {
                     bottomSheet(layoutHeight)
                 }[0].measure(looseConstraints)
-            val sheetOffsetY = sheetOffset().roundToInt()
+            // AstraFlow 补丁(2026-10-24): 面板上边不越过窗口顶。锚点还没算出来时
+            // SwipeableV2State 的上下界是无限的, 往上拖能把整个面板推成负 y, 露出下面的页面
+            //(用户 2026-10-24: 弹窗滑到底部后再向上滑, 整个弹窗被推上去)。
+            val sheetOffsetY = sheetOffset().roundToInt().coerceIn(0, layoutHeight)
             val sheetOffsetX = max(0, (layoutWidth - sheetPlaceable.width) / 2)
             sheetHeight = layoutHeight
             layout(layoutWidth, layoutHeight) {
